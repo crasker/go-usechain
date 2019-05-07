@@ -7,3 +7,5 @@ jobs:
       - checkout
       - run: go version
       - run: python --version
+      - run: pwd
+      - run: make test
