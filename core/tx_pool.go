@@ -139,6 +139,8 @@ var (
 
 	ErrLockSender = errors.New("locking account transaction can only send by committee")
 
+	ErrInheritSender = errors.New("inherit transaction can only send by committee")
+
 	// ErrCommentTo is returned if comment receipt
 	ErrCommentTo = errors.New("invalid receiver in comment transaction")
 
@@ -871,6 +873,24 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		}
 	}
 
+	// Ensure the transaction adheres to nonce ordering
+	if pool.currentState.GetNonce(from) > tx.Nonce() {
+		return ErrNonceTooLow
+	}
+	// Transactor should have enough funds to cover the costs
+	// cost == V + GP * GL
+	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
+		return ErrInsufficientFunds
+	}
+	intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
+	if err != nil {
+		return err
+	}
+	if tx.Gas() < intrGas {
+		return ErrIntrinsicGas
+	}
+
+	// validate special tx type
 	switch tx.Flag() {
 	case types.TxPbft:
 		// If it's vote transaction, verify & return
@@ -890,6 +910,10 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		if err != nil {
 			return err
 		}
+	case types.TxInherit:
+		if !manager.IsCommittee(pool.currentState, from) {
+			return ErrInheritSender
+		}
 	default:
 	}
 
@@ -897,23 +921,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	local = local || pool.locals.contains(from) // account may be local even if the transaction arrived from the network
 	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
 		return ErrUnderpriced
-	}
-
-	// Ensure the transaction adheres to nonce ordering
-	if pool.currentState.GetNonce(from) > tx.Nonce() {
-		return ErrNonceTooLow
-	}
-	// Transactor should have enough funds to cover the costs
-	// cost == V + GP * GL
-	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
-		return ErrInsufficientFunds
-	}
-	intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
-	if err != nil {
-		return err
-	}
-	if tx.Gas() < intrGas {
-		return ErrIntrinsicGas
 	}
 	return nil
 }
